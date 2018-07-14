@@ -34,6 +34,7 @@
 #include "array.h"
 #include "typedefs.h"
 #include "vector.h"
+#include "cowdata.h"
 
 /**
 	@author red <red@killy>
@@ -60,7 +61,9 @@ struct StrRange {
 	}
 };
 
-class String : public Vector<CharType> {
+class String {
+
+	CowData<CharType> _cowdata;
 
 	void copy_from(const char *p_cstr);
 	void copy_from(const CharType *p_cstr, int p_clip_to = -1);
@@ -72,6 +75,21 @@ public:
 
 		npos = -1 ///<for "some" compatibility with std::string (npos is a huge value in std::string)
 	};
+
+	_FORCE_INLINE_ CharType *ptrw() { return _cowdata.ptrw(); }
+	_FORCE_INLINE_ const CharType *ptr() const { return _cowdata.ptr(); }
+
+	void remove(int p_index) { _cowdata.remove(p_index); }
+
+	_FORCE_INLINE_ void clear() { resize(0); }
+
+	_FORCE_INLINE_ CharType get(int p_index) { return _cowdata.get(p_index); }
+	_FORCE_INLINE_ const CharType get(int p_index) const { return _cowdata.get(p_index); }
+	_FORCE_INLINE_ void set(int p_index, const CharType &p_elem) { _cowdata.set(p_index, p_elem); }
+	_FORCE_INLINE_ int size() const { return _cowdata.size(); }
+	Error resize(int p_size) { return _cowdata.resize(p_size); }
+	_FORCE_INLINE_ CharType &operator[](int p_index) { return _cowdata.get_m(p_index); }
+	_FORCE_INLINE_ const CharType &operator[](int p_index) const { return _cowdata.get(p_index); }
 
 	bool operator==(const String &p_str) const;
 	bool operator!=(const String &p_str) const;
@@ -191,8 +209,8 @@ public:
 	String dedent() const;
 	String strip_edges(bool left = true, bool right = true) const;
 	String strip_escapes() const;
-	String lstrip(const Vector<CharType> &p_chars) const;
-	String rstrip(const Vector<CharType> &p_chars) const;
+	String lstrip(const String &p_chars) const;
+	String rstrip(const String &p_chars) const;
 	String get_extension() const;
 	String get_basename() const;
 	String plus_file(const String &p_file) const;
@@ -253,9 +271,10 @@ public:
 	 * The constructors must not depend on other overloads
 	 */
 	/*	String(CharType p_char);*/
-	inline String() {}
-	inline String(const String &p_str) :
-			Vector(p_str) {}
+
+	_FORCE_INLINE_ String() {}
+	_FORCE_INLINE_ String(const String &p_str) { _cowdata._ref(p_str._cowdata); }
+
 	String(const char *p_str);
 	String(const CharType *p_str, int p_clip_to_len = -1);
 	String(const StrRange &p_range);
