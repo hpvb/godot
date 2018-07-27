@@ -1756,7 +1756,7 @@ void _File::store_var(const Variant &p_var) {
 Variant _File::get_var() const {
 
 	ERR_FAIL_COND_V(!f, Variant());
-	uint32_t len = get_32();
+	int32_t len = get_32();
 	DVector<uint8_t> buff = get_buffer(len);
 	ERR_FAIL_COND_V(buff.size() != len, Variant());
 
