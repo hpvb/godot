@@ -1,12 +1,12 @@
 /*************************************************************************/
-/*  thread_local.cpp                                                     */
+/*  skeleton_ik_editor_plugin.h                                             */
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
 /*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2018 Juan Linietsky, Ariel Manzur.                 */
-/* Copyright (c) 2014-2018 Godot Engine contributors (cf. AUTHORS.md)    */
+/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2017 Godot Engine contributors (cf. AUTHORS.md)    */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -28,80 +28,38 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
 
-#include "thread_local.h"
+#ifndef SKELETON_IK_EDITOR_PLUGIN_H
+#define SKELETON_IK_EDITOR_PLUGIN_H
 
-#ifdef WINDOWS_ENABLED
-#include <windows.h>
-#else
-#include <pthread.h>
-#endif
+#include "editor/editor_node.h"
+#include "editor/editor_plugin.h"
 
-#include "core/os/memory.h"
-#include "core/print_string.h"
+class SkeletonIK;
 
-struct ThreadLocalStorage::Impl {
+class SkeletonIKEditorPlugin : public EditorPlugin {
 
-#ifdef WINDOWS_ENABLED
-	DWORD dwFlsIndex;
-#else
-	pthread_key_t key;
-#endif
+	GDCLASS(SkeletonIKEditorPlugin, EditorPlugin);
 
-	void *get_value() const {
-#ifdef WINDOWS_ENABLED
-		return FlsGetValue(dwFlsIndex);
-#else
-		return pthread_getspecific(key);
-#endif
-	}
+	SkeletonIK *skeleton_ik;
 
-	void set_value(void *p_value) const {
-#ifdef WINDOWS_ENABLED
-		FlsSetValue(dwFlsIndex, p_value);
-#else
-		pthread_setspecific(key, p_value);
-#endif
-	}
+	Button *play_btn;
+	EditorNode *editor;
+	Vector<Transform> initial_bone_poses;
 
-#ifdef WINDOWS_ENABLED
-#define _CALLBACK_FUNC_ __stdcall
-#else
-#define _CALLBACK_FUNC_
-#endif
+	void _play();
 
-	Impl(void (_CALLBACK_FUNC_ *p_destr_callback_func)(void *)) {
-#ifdef WINDOWS_ENABLED
-		dwFlsIndex = FlsAlloc(p_destr_callback_func);
-		ERR_FAIL_COND(dwFlsIndex == FLS_OUT_OF_INDEXES);
-#else
-		pthread_key_create(&key, p_destr_callback_func);
-#endif
-	}
+protected:
+	static void _bind_methods();
 
-	~Impl() {
-#ifdef WINDOWS_ENABLED
-		FlsFree(dwFlsIndex);
-#else
-		pthread_key_delete(key);
-#endif
-	}
+public:
+	virtual String get_name() const { return "SkeletonIK"; }
+	bool has_main_screen() const { return false; }
+	virtual void edit(Object *p_object);
+	virtual bool handles(Object *p_object) const;
+	virtual void make_visible(bool p_visible);
+
+	SkeletonIKEditorPlugin(EditorNode *p_node);
+	~SkeletonIKEditorPlugin();
 };
 
-void *ThreadLocalStorage::get_value() const {
-	return pimpl->get_value();
-}
-
-void ThreadLocalStorage::set_value(void *p_value) const {
-	pimpl->set_value(p_value);
-}
-
-void ThreadLocalStorage::alloc(void (_CALLBACK_FUNC_ *p_destr_callback)(void *)) {
-	pimpl = memnew(ThreadLocalStorage::Impl(p_destr_callback));
-}
-
-#undef _CALLBACK_FUNC_
-
-void ThreadLocalStorage::free() {
-	memdelete(pimpl);
-	pimpl = NULL;
-}
+#endif // SKELETON_IK_EDITOR_PLUGIN_H
