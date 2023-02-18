@@ -34,185 +34,269 @@
 #include "core/typedefs.h"
 #include "math_funcs.h"
 
-#define SIGN2(a, b) ((b) >= 0.0 ? Math::abs(a) : -Math::abs(a))
-
-/*
- * Find a bracketing triplet (ax, bx, cx) such that bx is between ax and cx (so ax < bx < cx or cx < bx < ax) and f(bx) is less than both f(ax) and f(cx).
- */
-
-constexpr real_t GOLD = 1.618034; // The default ratio by which successive intervals are magnified.
-constexpr real_t GLIMIT = 100.0; // The maximum magnification allowed for a parabolic-fit step.
-constexpr real_t TINY = 1.0e-20; // Used to prevent any possible division by zero.
-#define SHFT(a, b, c, d) \
-	(a) = (b);           \
-	(b) = (c);           \
-	(c) = (d);
+// Define the golden ratio
+const real_t GOLDEN_RATIO = (1.0 + Math::sqrt(5.0)) / 2.0;
+const real_t GOLDEN_SECTION = 1.0 / GOLDEN_RATIO;
+const real_t TINY = 1.0e-20;
+const real_t TOL = 1e-6;
+const int MAX_ITERATIONS = 100;
 
 void Minimization::bracketing_triplet_from_interval(void *data, real_function *f, real_t *ax, real_t *bx, real_t *cx, real_t *fa, real_t *fb, real_t *fc) {
-	// Given a function f, and given distinct initial points ax and bx, this routine searches in
-	// the downhill direction (defined by the function as evaluated at the initial points) and returns
-	// new points ax, bx, cx that bracket a minimum of the function. Also returned are the function
-	// values at the three points, fa, fb, and fc.
+	real_t a = *ax, b = *bx, c = *cx;
+	real_t x, w, v, fx, fw, fv, u, fu;
+	real_t d, e;
+	real_t p, q, r, tol1, tol2;
 
-	real_t ulim, u, r, q, fu, dum;
-	*fa = (*f)(data, *ax);
-	*fb = (*f)(data, *bx);
-	if (*fb > *fa) { // Switch roles of a and b so that we can go downhill
-		SHFT(dum, *ax, *bx, dum) // in the direction from a to b.
-		SHFT(dum, *fb, *fa, dum)
-	}
-	*cx = (*bx) + GOLD * (*bx - *ax); // First guess for c.
-	*fc = (*f)(data, *cx);
-	while (*fb > *fc) { // Keep returning here until we bracket.
-		// Compute u by parabolic extrapolation from a; b; c.
-		r = (*bx - *ax) * (*fb - *fc);
-		q = (*bx - *cx) * (*fb - *fa);
-		u = (*bx) - ((*bx - *cx) * q - (*bx - *ax) * r) / (2.0 * SIGN2(MAX(Math::abs(q - r), TINY), q - r));
-		ulim = (*bx) + GLIMIT * (*cx - *bx);
-		// We won't go farther than this. Test various possibilities:
-		if ((*bx - u) * (u - *cx) > 0.0) { // Parabolic u is between b and c: try it.
-			fu = (*f)(data, u);
-			if (fu < *fc) { // Got a minimum between b and c.
-				*ax = (*bx);
-				*bx = u;
-				*fa = (*fb);
-				*fb = fu;
-				return;
-			} else if (fu > *fb) { // Got a minimum between between a and u.
-				*cx = u;
-				*fc = fu;
-				return;
-			}
-			u = (*cx) + GOLD * (*cx - *bx); // Parabolic fit was no use. Use default magnification.
-			fu = (*f)(data, u);
-		} else if ((*cx - u) * (u - ulim) > 0.0) { // Parabolic fit is between c and its allowed limit.
-			fu = (*f)(data, u);
-			if (fu < *fc) {
-				SHFT(*bx, *cx, u, *cx + GOLD * (*cx - *bx))
-				SHFT(*fb, *fc, fu, (*f)(data, u))
-			}
-		} else if ((u - ulim) * (ulim - *cx) >= 0.0) { // Limit parabolic u to maximum allowed value.
-			u = ulim;
-			fu = (*f)(data, u);
-		} else { // Reject parabolic u, use default magnification.
-			u = (*cx) + GOLD * (*cx - *bx);
-			fu = (*f)(data, u);
+	fx = f(data, b);
+	fv = fw = fx;
+	v = w = b - a;
+	x = c;
+	u = d = e = 0.0;
+	fu = *fb;
+
+	for (int iter = 0; iter < MAX_ITERATIONS; ++iter) {
+		real_t xm = 0.5 * (a + c);
+		tol1 = TOL * Math::abs(x) + TINY;
+		tol2 = tol1 * 2.0;
+
+		// If the difference between x and xm is within tolerance, we're done
+		if (Math::abs(x - xm) <= (tol2 - 0.5 * (c - a))) {
+			*ax = a;
+			*bx = x;
+			*cx = c;
+			*fa = f(data, a);
+			*fb = fx;
+			*fc = f(data, c);
+			return;
 		}
-		SHFT(*ax, *bx, *cx, u) // Eliminate oldest point and continue.
-		SHFT(*fa, *fb, *fc, fu)
+
+		if (Math::abs(e) > tol1) {
+			// Use Brent's method to find a new point
+			r = (x - w) * (fx - fv);
+			q = (x - v) * (fx - fw);
+			p = (x - v) * q - (x - w) * r;
+			q = 2.0 * (q - r);
+
+			if (q > 0.0) {
+				p = -p;
+			} else {
+				q = -q;
+			}
+
+			r = e;
+			e = d;
+			// Check if the new point is within the bracketing interval and satisfies the conditions for success
+			if (Math::abs(p) < Math::abs(0.5 * q * r) && p > q * (a - x) && p < q * (c - x)) {
+				d = p / q;
+				u = x + d;
+
+				// If the new point is too close to a or c, adjust it slightly
+				if (u - a < tol2 || c - u < tol2) {
+					d = tol1 * ((x < xm) ? 1.0 : -1.0);
+				}
+			} else {
+				// If Brent's method fails, use golden section search
+				if (x < xm) {
+					e = c - x;
+				} else {
+					e = a - x;
+				}
+
+				d = GOLDEN_SECTION * e;
+			}
+		} else {
+			// If the previous step was not successful, use golden section search
+			if (x < xm) {
+				e = c - x;
+			} else {
+				e = a - x;
+			}
+
+			d = GOLDEN_SECTION * e;
+		}
+		// Compute the new point and its function value
+		if (Math::abs(d) >= tol1) {
+			u = x + d;
+		} else {
+			u = x + ((d > 0.0) ? tol1 : -tol1);
+		}
+
+		fu = f(data, u);
+
+		// Update the bracketing triplet and their function values
+		if (fu <= fx) {
+			if (u >= x) {
+				a = x;
+			} else {
+				c = x;
+			}
+
+			v = w;
+			fv = fw;
+			w = x;
+			fw = fx;
+			x = u;
+			fx = fu;
+		} else {
+			if (u >= x) {
+				c = u;
+			} else {
+				a = u;
+			}
+
+			if (fu <= fw || w == x) {
+				v = w;
+				fv = fw;
+				w = u;
+				fw = fu;
+			} else if (fu <= fv || v == x || v == w) {
+				v = u;
+				fv = fu;
+			}
+		}
 	}
+
+	// Maximum iterations reached without finding a bracket
+	*ax = a;
+	*bx = x;
+	*cx = c;
+	*fa = f(data, a);
+	*fb = fx;
+	*fc = f(data, c);
+	ERR_FAIL_MSG("bracketing_triplet_from_interval failed to find a bracket");
 }
 
-/*
- * Find a local minimum of a differentiable real-valued function using a modification of Richard P. Brent's method, making use of the derivative.
- */
+real_t Minimization::get_local_minimum(void *data, real_function *f, real_function *dw, real_t ax, real_t bx, real_t cx, real_t tol, real_t *xmin) {
+	real_t a = (ax < cx) ? ax : cx;
+	real_t b = (ax > cx) ? ax : cx;
+	real_t x = bx;
+	real_t w = bx;
+	real_t v = bx;
+	real_t fx = f(data, x);
+	real_t fx_prev = fx;
+	real_t fw = fx;
+	real_t fv = fx;
+	real_t e = 0.0;
+	real_t d = 0.0;
 
-constexpr int ITMAX = 100;
-constexpr real_t ZEPS = 1e-6;
-#define MOV3(a, b, c, d, e, f) \
-	(a) = (d);                 \
-	(b) = (e);                 \
-	(c) = (f);
+	// Pre-compute constants
+	const real_t tol1 = tol * Math::abs(x) + TOL;
+	const real_t tol2 = 2.0 * tol1;
+	const real_t tol3 = tol1 / 10.0;
 
-real_t Minimization::get_local_minimum(void *data, real_function *f, real_function *df, real_t ax, real_t bx, real_t cx, real_t tol, real_t *xmin) {
-	// Given a function f and its derivative function df, and given a bracketing triplet of abscissas ax,
-	// bx, cx [such that bx is between ax and cx, and f(bx) is less than both f(ax) and f(cx)],
-	// this routine isolates the minimum to a fractional precision of about tol using a modification of
-	// Brent's method that uses derivatives. The abscissa of the minimum is returned as xmin, and
-	// the minimum function value is returned as min, the returned function value.
+	for (int iter = 0; iter < MAX_ITERATIONS; ++iter) {
+		const real_t xm = 0.5 * (a + b);
 
-	int iter;
-	bool ok1, ok2; // Will be used as flags for whether proposed steps are acceptable or not.
-	real_t a, b, d = 0.0, d1, d2, du, dv, dw, dx, e = 0.0;
-	real_t fu, fv, fw, fx, olde = 0.0, tol1, tol2, u, u1, u2, v, w, x, xm;
-
-	a = (ax < cx ? ax : cx);
-	b = (ax > cx ? ax : cx);
-	x = w = v = bx;
-	fw = fv = fx = (*f)(data, x);
-	dw = dv = dx = (*df)(data, x);
-	for (iter = 1; iter <= ITMAX; iter++) {
-		xm = 0.5 * (a + b);
-		tol1 = tol * Math::abs(x) + ZEPS;
-		tol2 = 2.0 * tol1;
+		// Check if we have converged
 		if (Math::abs(x - xm) <= (tol2 - 0.5 * (b - a))) {
 			*xmin = x;
 			return fx;
 		}
+
+		if (b - a < tol3) {
+			// Bracketing interval is small enough
+			*xmin = x;
+			return fx;
+		}
+
+		if (Math::abs(fx - fx_prev) < tol) {
+			// Change in function value is small enough
+			*xmin = x;
+			return fx;
+		}
+
+		fx_prev = fx;
+		real_t u = x;
+
+		// Use the secant method to calculate the next step size
 		if (Math::abs(e) > tol1) {
-			// Initialize these d's to an out-of-bracket value.
-			d1 = 2.0 * (b - a);
-			d2 = d1;
-			if (dw != dx) {
-				d1 = (w - x) * dx / (dx - dw); // Secant method with one point.
+			const real_t r = (x - w) * (fx - fv);
+			real_t q = (x - v) * (fx - fw);
+			real_t p = (x - v) * q - (x - w) * r;
+			q = 2.0 * (q - r);
+			if (q > 0.0) {
+				p = -p;
 			}
-			if (dv != dx) {
-				d2 = (v - x) * dx / (dx - dv); // And the other.
-			}
-			// Which of these two estimates of d shall we take? We will insist that they be within the bracket, and on the side pointed to by the derivative at x.
-			u1 = x + d1;
-			u2 = x + d2;
-			ok1 = (a - u1) * (u1 - b) > 0.0 && dx * d1 <= 0.0;
-			ok2 = (a - u2) * (u2 - b) > 0.0 && dx * d2 <= 0.0;
-			olde = e; // Movement on the step before last.
+			q = Math::abs(q);
+			const real_t etemp = e;
 			e = d;
-			if (ok1 || ok2) { // Take only an acceptable d,
-				if (ok1 && ok2) { // and if both are acceptable, then take the smallest one.
-					d = (Math::abs(d1) < Math::abs(d2) ? d1 : d2);
-				} else if (ok1) {
-					d = d1;
-				} else {
-					d = d2;
-				}
-				if (Math::abs(d) <= Math::abs(0.5 * olde)) {
-					u = x + d;
-					if (u - a < tol2 || b - u < tol2) {
-						d = SIGN2(tol1, xm - x);
-					}
-				} else { // Bisect, not golden section.
-					d = 0.5 * (e = (dx >= 0.0 ? a - x : b - x)); // Decide which segment by the sign of the derivative.
-				}
+			if (Math::abs(p) >= Math::abs(0.5 * q * etemp) || p <= q * (a - x) || p >= q * (b - x)) {
+				// Perform golden section step with adaptive step size
+				const real_t e_sign = signbit(x >= xm ? a - x : b - x);
+				e = a - x + b - x;
+				const real_t step_size = e * e_sign / (q + TINY);
+				d = step_size;
 			} else {
-				d = 0.5 * (e = (dx >= 0.0 ? a - x : b - x));
+				// Use parabolic interpolation with adaptive step size
+				d = p / q;
+				u = x + d;
+				if (u - a < tol2 || b - u < tol2) {
+					const real_t e_sign = signbit(x >= xm ? a - x : b - x);
+					e = a - x + b - x;
+					const real_t step_size = e * e_sign / (q + TINY);
+					d = step_size;
+				}
 			}
 		} else {
-			d = 0.5 * (e = (dx >= 0.0 ? a - x : b - x));
+			// Perform golden section step with adaptive step size
+			const real_t e_sign = signbit(x >= xm ? a - x : b - x);
+			e = a - x + b - x;
+			const real_t step_size = e * e_sign / (GOLDEN_RATIO + TINY);
+			d = step_size;
 		}
-		if (Math::abs(d) >= tol1) {
-			u = x + d;
-			fu = (*f)(data, u);
-		} else {
-			u = x + SIGN2(tol1, d);
-			fu = (*f)(data, u);
-			if (fu > fx) { // If the minimum step in the downhill direction takes us uphill, then we are done.
-				*xmin = x;
-				return fx;
+
+		// Use the Newton-Raphson method to refine the estimate of the minimum
+		const real_t dw_u = dw ? dw(data, u) : 0.0;
+		real_t f_u = f(data, u);
+		if (dw_u != 0.0) {
+			const real_t u_newton = u - f_u / dw_u;
+			if (u_newton > a && u_newton < b && Math::abs(u_newton - u) < tol1) {
+				const real_t f_u_newton = f(data, u_newton);
+				if (f_u_newton < f_u) {
+					u = u_newton;
+					f_u = f_u_newton;
+				}
 			}
 		}
-		// Now all the housekeeping.
-		du = (*df)(data, u);
-		if (fu <= fx) {
+
+		// Check if we have converged
+		if (Math::abs(x - u) < tol) {
+			*xmin = x;
+			return fx;
+		}
+
+		// Update bracketing interval
+		if (f_u <= fx) {
 			if (u >= x) {
 				a = x;
 			} else {
 				b = x;
 			}
-			MOV3(v, fv, dv, w, fw, dw)
-			MOV3(w, fw, dw, x, fx, dx)
-			MOV3(x, fx, dx, u, fu, du)
+			v = w;
+			w = x;
+			x = u;
+			fv = fw;
+			fw = fx;
+			fx = f_u;
 		} else {
 			if (u < x) {
 				a = u;
 			} else {
 				b = u;
 			}
-			if (fu <= fw || w == x) {
-				MOV3(v, fv, dv, w, fw, dw)
-				MOV3(w, fw, dw, u, fu, du)
-			} else if (fu < fv || v == x || v == w) {
-				MOV3(v, fv, dv, u, fu, du)
+			if (f_u <= fw || w == x) {
+				v = w;
+				w = u;
+				fv = fw;
+				fw = f_u;
+			} else if (f_u <= fv || v == x || v == w) {
+				v = u;
+				fv = f_u;
 			}
 		}
 	}
-	ERR_FAIL_V_MSG(0.0, "get_local_minimum failed to converge.");
+
+	// Maximum number of iterations exceeded
+	*xmin = x;
+	ERR_FAIL_V_MSG(fx, "get_local_minimum failed to converge.");
 }
