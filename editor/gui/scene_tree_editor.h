@@ -35,6 +35,7 @@
 #include "scene/gui/check_button.h"
 #include "scene/gui/dialogs.h"
 #include "scene/gui/tree.h"
+#include <cstdint>
 
 class EditorSelection;
 class TextureRect;
@@ -58,6 +59,47 @@ class SceneTreeEditor : public Control {
 		BUTTON_UNIQUE = 9,
 	};
 
+	struct CachedNode {
+		Node *node;
+		TreeItem *item;
+		int index = -1;
+		bool dirty = true;
+		bool has_moved_children = false;
+		uint16_t delete_serial = UINT16_MAX;
+
+		// To know whether to update children or not.
+		bool can_process = false;
+
+		CachedNode(Node *p_node, TreeItem *p_item) :
+				node(p_node), item(p_item) {}
+	};
+
+	struct NodeCache {
+		~NodeCache() {
+			clear();
+		}
+
+		HashMap<Node *, CachedNode>::Iterator add(Node *p_node, TreeItem *p_item);
+		HashMap<Node *, CachedNode>::Iterator get(Node *p_node);
+		void remove(Node *p_node, bool p_recursive = false);
+		void mark_dirty(Node *p_node, bool p_parents = true);
+		void mark_dirty(HashMap<Node *, CachedNode>::Iterator &I, bool p_parents = true);
+		void mark_children_dirty(Node *p_node, bool p_recursive = false);
+
+		void delete_pending();
+		void clear();
+
+		HashMap<Node *, CachedNode> cache;
+		List<CachedNode *> to_delete;
+		Node *current_scene_node = nullptr;
+		Node *current_pinned_node = nullptr;
+		bool current_has_pin = false;
+		bool force_update = false;
+		uint8_t delete_serial = 0;
+	};
+
+	NodeCache node_cache;
+
 	Tree *tree = nullptr;
 	Node *selected = nullptr;
 	ObjectID instance_node;
@@ -77,17 +119,30 @@ class SceneTreeEditor : public Control {
 	bool auto_expand_selected = true;
 	bool connect_to_script_mode = false;
 	bool connecting_signal = false;
+	bool update_when_invisible = true;
 
 	int blocked;
 
 	void _compute_hash(Node *p_node, uint64_t &hash);
+	void _reset();
 
-	void _add_nodes(Node *p_node, TreeItem *p_parent);
+	void _update_node_path(Node *p_node, bool p_recursive = true);
+	void _update_node_subtree(Node *p_node, TreeItem *p_parent, bool force = false);
+	void _update_node(Node *p_node, TreeItem *p_item, bool part_of_subscene);
+	void _update_if_clean();
+
 	void _test_update_tree();
 	bool _update_filter(TreeItem *p_parent = nullptr, bool p_scroll_to_selected = false);
 	bool _item_matches_all_terms(TreeItem *p_item, const PackedStringArray &p_terms);
 	void _tree_changed();
 	void _tree_process_mode_changed();
+
+	void _move_node_children(HashMap<Node *, CachedNode>::Iterator &p_I);
+	void _move_node_item(TreeItem *p_parent, HashMap<Node *, CachedNode>::Iterator &p_I);
+
+	void _node_child_order_changed(Node *p_node);
+	void _node_editor_state_changed(Node *p_node);
+	void _node_added(Node *p_node);
 	void _node_removed(Node *p_node);
 	void _node_renamed(Node *p_node);
 
@@ -142,6 +197,7 @@ class SceneTreeEditor : public Control {
 	void _rmb_select(const Vector2 &p_pos, MouseButton p_button = MouseButton::RIGHT);
 
 	void _warning_changed(Node *p_for_node);
+	void _update_marking_list(const HashSet<Node *> &p_marked);
 
 	Timer *update_timer = nullptr;
 
@@ -182,6 +238,7 @@ public:
 	void set_auto_expand_selected(bool p_auto, bool p_update_settings);
 	void set_connect_to_script_mode(bool p_enable);
 	void set_connecting_signal(bool p_enable);
+	void set_update_when_invisible(bool p_enable);
 
 	Tree *get_scene_tree() { return tree; }
 
