@@ -1258,6 +1258,16 @@ void TreeItem::deselect(int p_column) {
 	_cell_deselected(p_column);
 }
 
+void TreeItem::clear_buttons() {
+	for (int i = 0; i < cells.size(); ++i) {
+		if (!cells[i].buttons.is_empty()) {
+			cells.write[i].buttons.clear();
+			cells.write[i].cached_minimum_size_dirty = true;
+			_changed_notify(i);
+		}
+	}
+}
+
 void TreeItem::add_button(int p_column, const Ref<Texture2D> &p_button, int p_id, bool p_disabled, const String &p_tooltip) {
 	ERR_FAIL_INDEX(p_column, cells.size());
 	ERR_FAIL_COND(!p_button.is_valid());
@@ -3726,7 +3736,7 @@ void Tree::gui_input(const Ref<InputEvent> &p_event) {
 		_determine_hovered_item();
 
 		bool rtl = is_layout_rtl();
-		if (pressing_for_editor && popup_pressing_edited_item && (popup_pressing_edited_item->get_cell_mode(popup_pressing_edited_item_column) == TreeItem::CELL_MODE_RANGE)) {
+		if (pressing_for_editor && popup_pressing_edited_item && !popup_pressing_edited_item->cells.is_empty() && (popup_pressing_edited_item->get_cell_mode(popup_pressing_edited_item_column) == TreeItem::CELL_MODE_RANGE)) {
 			/* This needs to happen now, because the popup can be closed when pressing another item, and must remain the popup edited item until it actually closes */
 			popup_edited_item = popup_pressing_edited_item;
 			popup_edited_item_col = popup_pressing_edited_item_column;
