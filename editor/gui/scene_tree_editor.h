@@ -31,6 +31,7 @@
 #ifndef SCENE_TREE_EDITOR_H
 #define SCENE_TREE_EDITOR_H
 
+#include "core/templates/hash_map.h"
 #include "scene/gui/check_box.h"
 #include "scene/gui/check_button.h"
 #include "scene/gui/dialogs.h"
@@ -58,6 +59,27 @@ class SceneTreeEditor : public Control {
 		BUTTON_UNIQUE = 9,
 	};
 
+#define COLOR_SENTINEL Color(NAN, NAN, NAN, NAN)
+	struct CachedNode {
+		TreeItem *item = nullptr;
+		Color pre_filter_color = COLOR_SENTINEL;
+		int index = -1;
+		uint32_t hash = 0;
+		uint16_t last_epoch = UINT16_MAX;
+		bool pinned = false;
+		bool marked = false;
+		bool selected = false;
+		bool part_of_subscene = false;
+	};
+
+	HashMap<Node *, CachedNode> node_cache;
+	// Keeps track of the current iteration of rebuilding
+	// the scene tree widgets. We use an epoch value rather
+	// than a flag per CachedNode so we only need to do one
+	// write per CachedNode per iteration, plus one increment.
+	uint8_t node_cache_epoch = 0;
+	Node *current_scene_node = nullptr;
+
 	Tree *tree = nullptr;
 	Node *selected = nullptr;
 	ObjectID instance_node;
@@ -82,7 +104,9 @@ class SceneTreeEditor : public Control {
 
 	void _compute_hash(Node *p_node, uint64_t &hash);
 
-	void _add_nodes(Node *p_node, TreeItem *p_parent);
+	void _update_nodes(Node *p_node, TreeItem *p_parent, bool force_update = false);
+	void _update_node(Node *p_node, TreeItem *p_item, bool part_of_subscene);
+
 	void _test_update_tree();
 	bool _update_filter(TreeItem *p_parent = nullptr, bool p_scroll_to_selected = false);
 	bool _item_matches_all_terms(TreeItem *p_item, const PackedStringArray &p_terms);

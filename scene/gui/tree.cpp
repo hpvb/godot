@@ -1258,6 +1258,16 @@ void TreeItem::deselect(int p_column) {
 	_cell_deselected(p_column);
 }
 
+void TreeItem::clear_buttons() {
+	for (int i = 0; i < cells.size(); ++i) {
+		if (cells[i].buttons.size()) {
+			cells.write[i].buttons.clear();
+			cells.write[i].cached_minimum_size_dirty = true;
+			_changed_notify(i);
+		}
+	}
+}
+
 void TreeItem::add_button(int p_column, const Ref<Texture2D> &p_button, int p_id, bool p_disabled, const String &p_tooltip) {
 	ERR_FAIL_INDEX(p_column, cells.size());
 	ERR_FAIL_COND(!p_button.is_valid());
