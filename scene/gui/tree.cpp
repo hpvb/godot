@@ -1778,6 +1778,7 @@ void TreeItem::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_custom_as_button", "column", "enable"), &TreeItem::set_custom_as_button);
 	ClassDB::bind_method(D_METHOD("is_custom_set_as_button", "column"), &TreeItem::is_custom_set_as_button);
 
+	ClassDB::bind_method(D_METHOD("clear_buttons"), &TreeItem::clear_buttons);
 	ClassDB::bind_method(D_METHOD("add_button", "column", "button", "id", "disabled", "tooltip_text"), &TreeItem::add_button, DEFVAL(-1), DEFVAL(false), DEFVAL(""));
 	ClassDB::bind_method(D_METHOD("get_button_count", "column"), &TreeItem::get_button_count);
 	ClassDB::bind_method(D_METHOD("get_button_tooltip_text", "column", "button_index"), &TreeItem::get_button_tooltip_text);
