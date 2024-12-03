@@ -222,11 +222,20 @@ void SceneTreeEditor::_update_node_subtree(Node *p_node, TreeItem *p_parent, boo
 		return;
 	}
 
+	if (!p_parent) {
+		String n = ((String)p_node->get_name());
+		char *c = (char *)malloc(n.size() + 1);
+		c[n.size()] = '\0';
+		memcpy(c, n.to_ascii_buffer().ptr(), n.size());
+
+		printf("_update_node_subtree %s, visible: %i, in_tree: %i\n", c, is_visible_in_tree(), is_inside_tree());
+		free(c);
+	}
 	// only owned nodes are editable, since nodes can create their own (manually owned) child nodes,
 	// which the editor needs not to know about.
 
 	bool part_of_subscene = false;
-	HashMap<Node *, CachedNode>::Iterator I = node_cache.find(p_node);
+	HashMap<Node *, CachedNode>::Iterator I = node_cache.get(p_node);
 
 	if (!display_foreign && p_node->get_owner() != get_scene_node() && p_node != get_scene_node()) {
 		if ((show_enabled_subscene || can_open_instance) && p_node->get_owner() && (get_scene_node()->is_editable_instance(p_node->get_owner()))) {
@@ -235,7 +244,8 @@ void SceneTreeEditor::_update_node_subtree(Node *p_node, TreeItem *p_parent, boo
 		} else {
 			if (I) {
 				// stale node, remove recursively.
-				_node_cache_remove(p_node, true);
+				printf("Deleting stale node %s\n", ((String)p_node->get_name()).to_utf8_buffer().ptr());
+				node_cache.remove(p_node, true);
 			}
 			return;
 		}
@@ -252,47 +262,26 @@ void SceneTreeEditor::_update_node_subtree(Node *p_node, TreeItem *p_parent, boo
 	} else {
 		// We don't set the node_index cache here. As undo/redo might've just recreated this.
 		item = tree->create_item(p_parent);
-		CachedNode cached_node(item);
-		I = node_cache.insert(p_node, cached_node);
+		I = node_cache.add(p_node, item);
+		if (p_parent) {
+			printf("Creating new node %s/%s\n", ((String)p_node->get_parent()->get_name()).to_utf8_buffer().ptr(), ((String)p_node->get_name()).to_utf8_buffer().ptr());
+			//print_line(vformat("Moving new child %s/%s", p_parent->get_text(0), p_node->get_name()));
+		} else {
+		}
+		_move_node_item(p_parent, I);
 		is_new = true;
+	}
+
+	if (I->value.has_moved_children) {
+		_move_node_children(I);
 	}
 
 	bool dirty = force_update || I->value.dirty;
 
-	if (p_parent && dirty) {
-		bool reparent = false;
-		int current_node_index = p_node->get_index(false);
-
-		if (item->get_parent() != p_parent) {
-			TreeItem *p = item->get_parent();
-			if (p) {
-				item->get_parent()->remove_child(item);
-			}
-			p_parent->add_child(item);
-			reparent = true;
-		}
-
-		if (I->value.index != current_node_index || reparent) {
-			int child_index = CLAMP(current_node_index, 0, p_parent->get_child_count() - 1);
-
-			TreeItem *new_neigbor = p_parent->get_child(child_index);
-			if (new_neigbor != item) {
-				if (child_index == p_parent->get_child_count() - 1) {
-					item->move_after(new_neigbor);
-				} else {
-					item->move_before(new_neigbor);
-				}
-			}
-		}
-		I->value.index = current_node_index;
-		I->value.can_process = p_node->can_process();
-	} else {
-		I->value.index = 0;
-	}
-
 	if (dirty) {
 		_update_node(p_node, item, part_of_subscene);
 		I->value.dirty = false;
+		I->value.can_process = p_node->can_process();
 
 		// Force update all our children if we are new or if we were forced to update.
 		bool force_update_children = force_update || is_new;
@@ -300,10 +289,6 @@ void SceneTreeEditor::_update_node_subtree(Node *p_node, TreeItem *p_parent, boo
 		for (int i = 0; i < p_node->get_child_count(false); i++) {
 			_update_node_subtree(p_node->get_child(i, false), item, force_update_children);
 		}
-
-	} else {
-		// A parent might have moved/renamed.
-		item->set_metadata(0, p_node->get_path());
 	}
 
 	if (valid_types.size()) {
@@ -584,6 +569,15 @@ void SceneTreeEditor::_update_node(Node *p_node, TreeItem *p_item, bool part_of_
 	}
 }
 
+void SceneTreeEditor::_update_if_clean() {
+	if (tree_dirty) {
+		return;
+	}
+
+	callable_mp(this, &SceneTreeEditor::_update_tree).call_deferred(false);
+	tree_dirty = true;
+}
+
 void SceneTreeEditor::_queue_update_node_tooltip(Node *p_node, TreeItem *p_item) {
 	Callable update_tooltip = callable_mp(this, &SceneTreeEditor::_update_node_tooltip);
 	if (update_node_tooltip_delay->is_connected("timeout", update_tooltip)) {
@@ -629,7 +623,7 @@ void SceneTreeEditor::_update_node_tooltip(Node *p_node, TreeItem *p_item) {
 }
 
 void SceneTreeEditor::_node_visibility_changed(Node *p_node) {
-	HashMap<Node *, CachedNode>::Iterator I = node_cache.find(p_node);
+	HashMap<Node *, CachedNode>::Iterator I = node_cache.get(p_node);
 	if (!I) {
 		// We leave these signals connected when switching tabs.
 		// If the node is not in cache it was for a different tab.
@@ -685,84 +679,115 @@ void SceneTreeEditor::_set_item_custom_color(TreeItem *p_item, Color p_color) {
 }
 
 void SceneTreeEditor::_node_script_changed(Node *p_node) {
-	HashMap<Node *, CachedNode>::Iterator I = node_cache.find(p_node);
+	HashMap<Node *, CachedNode>::Iterator I = node_cache.get(p_node);
 	if (!I) {
 		// We leave these signals connected when switching tabs.
 		// If the node is not in cache it was for a different tab.
 		return;
 	}
 
-	_mark_node_and_parents_dirty(p_node);
+	node_cache.mark_dirty(p_node);
 
-	if (tree_dirty) {
+	_update_if_clean();
+}
+
+void SceneTreeEditor::_move_node_children(HashMap<Node *, CachedNode>::Iterator &p_I) {
+	TreeItem *item = p_I->value.item;
+	Node *node = p_I->key;
+	int cc = node->get_child_count(false);
+
+	for (int i = 0; i < cc; i++) {
+		HashMap<Node *, CachedNode>::Iterator CI = node_cache.get(node->get_child(i, false));
+		if (CI) {
+			printf("Node_child_order_changed for %s moving %s\n", ((String)node->get_name()).to_utf8_buffer().ptr(), ((String)node->get_child(i, false)->get_name()).to_utf8_buffer().ptr());
+			_move_node_item(item, CI);
+		}
+	}
+
+	p_I->value.has_moved_children = false;
+}
+
+void SceneTreeEditor::_move_node_item(TreeItem *p_parent, HashMap<Node *, CachedNode>::Iterator &p_I) {
+	if (!p_parent) {
 		return;
 	}
 
-	callable_mp(this, &SceneTreeEditor::_update_tree).call_deferred(false);
-	tree_dirty = true;
-}
+	Node *node = p_I->key;
+	Node *node_parent = node->get_parent();
 
-void SceneTreeEditor::_mark_node_children_dirty(Node *p_node, bool recursive) {
-	int cc = p_node->get_child_count(false);
-	for (int i = 0; i < cc; i++) {
-		Node *c = p_node->get_child(i, false);
-		HashMap<Node *, CachedNode>::Iterator IC = node_cache.find(c);
+	int current_node_index = node->get_index(false);
+	TreeItem *item = p_I->value.item;
 
-		if (IC) {
-			IC->value.dirty = true;
-			if (recursive) {
-				_mark_node_children_dirty(c, recursive);
-			}
+	if (item->get_parent() != p_parent) {
+		TreeItem *p = item->get_parent();
+		if (p) {
+			item->get_parent()->remove_child(item);
 		}
+		p_parent->add_child(item);
+		p_I->value.index = -1;
 	}
-}
 
-void SceneTreeEditor::_node_cache_remove(Node *p_node, bool recursive) {
-	HashMap<Node *, CachedNode>::Iterator I = node_cache.find(p_node);
-	if (I) {
-		if (recursive) {
-			int cc = p_node->get_child_count(false);
-
-			for (int i = 0; i < cc; i++) {
-				_node_cache_remove(p_node->get_child(i, false), recursive);
-			}
+	if (p_I->value.index != current_node_index) {
+		// Are we already in the right place?
+		if (current_node_index == item->get_index()) {
+			p_I->value.index = current_node_index;
+			//print_line(vformat("%s/%s already in the right place", node_parent->get_name(), node->get_name()));
+			return;
 		}
 
-		memdelete(I->value.item);
-		node_cache.remove(I);
-	}
-}
+		bool last_node = false;
+		Node *neighbor;
+		// Are we the last node?
+		if (current_node_index == node_parent->get_child_count() - 1) {
+			neighbor = node_parent->get_child(current_node_index - 1);
+			last_node = true;
+		} else {
+			neighbor = node_parent->get_child(current_node_index + 1);
+		}
 
-void SceneTreeEditor::_mark_node_and_parents_dirty(Node *p_node) {
-	Node *node = p_node;
-	while (node) {
-		HashMap<Node *, CachedNode>::Iterator I = node_cache.find(node);
+		HashMap<Node *, CachedNode>::Iterator I = node_cache.get(neighbor);
+		// This happens after node_added so this shouldn't be possible.
 		if (I) {
-			I->value.dirty = true;
+			// The TreeItem in our way.
+			TreeItem *neighbor_item = I->value.item;
+			if (last_node) {
+				item->move_after(neighbor_item);
+			} else {
+				item->move_before(neighbor_item);
+			}
+			p_I->value.index = current_node_index;
 		}
-
-		node = node->get_parent();
 	}
 }
 
 void SceneTreeEditor::_node_child_order_changed(Node *p_node) {
-	_mark_node_and_parents_dirty(p_node);
-	_mark_node_children_dirty(p_node);
+	HashMap<Node *, CachedNode>::Iterator I = node_cache.get(p_node);
+	if (I) {
+		node_cache.mark_dirty(I);
+		I->value.has_moved_children = true;
+	}
+
+	_update_if_clean();
 }
 
 void SceneTreeEditor::_node_editor_state_changed(Node *p_node) {
-	_mark_node_and_parents_dirty(p_node);
-	HashMap<Node *, CachedNode>::Iterator I = node_cache.find(p_node);
+	printf("_node_editor_state_changed %s\n", ((String)p_node->get_name()).to_utf8_buffer().ptr());
+
+	node_cache.mark_dirty(p_node);
+	HashMap<Node *, CachedNode>::Iterator I = node_cache.get(p_node);
 	if (I) {
 		if (p_node->can_process() != I->value.can_process) {
 			// All our children also change process mode.
-			_mark_node_children_dirty(p_node, true);
+			node_cache.mark_children_dirty(p_node, true);
 		}
 	}
+
+	_update_if_clean();
 }
 
 void SceneTreeEditor::_node_added(Node *p_node) {
-	_mark_node_and_parents_dirty(p_node);
+	node_cache.mark_dirty(p_node);
+	_update_if_clean();
 }
 
 void SceneTreeEditor::_node_removed(Node *p_node) {
@@ -778,8 +803,9 @@ void SceneTreeEditor::_node_removed(Node *p_node) {
 		selected = nullptr;
 	}
 
-	_mark_node_and_parents_dirty(p_node);
-	_node_cache_remove(p_node);
+	node_cache.mark_dirty(p_node);
+	node_cache.remove(p_node);
+	_update_if_clean();
 }
 
 void SceneTreeEditor::_node_renamed(Node *p_node) {
@@ -787,21 +813,22 @@ void SceneTreeEditor::_node_renamed(Node *p_node) {
 		return;
 	}
 
-	_mark_node_and_parents_dirty(p_node);
+	node_cache.mark_dirty(p_node);
 	// recursively update child node paths.
-	_mark_node_children_dirty(p_node, true);
+	node_cache.mark_children_dirty(p_node, true);
 
 	emit_signal(SNAME("node_renamed"));
 
-	if (!tree_dirty) {
-		callable_mp(this, &SceneTreeEditor::_update_tree).call_deferred(false);
-		tree_dirty = true;
-	}
+	_update_if_clean();
 }
 
 void SceneTreeEditor::_update_tree(bool p_scroll_to_selected) {
 	if (!is_inside_tree()) {
 		tree_dirty = false;
+		return;
+	}
+
+	if (!update_when_invisble && !is_visible()) {
 		return;
 	}
 
@@ -826,12 +853,12 @@ void SceneTreeEditor::_update_tree(bool p_scroll_to_selected) {
 		// If pinned state changed, update the currently pinned node.
 		if (AnimationPlayerEditor::get_singleton()->is_pinned() != current_has_pin) {
 			current_has_pin = AnimationPlayerEditor::get_singleton()->is_pinned();
-			_mark_node_and_parents_dirty(pinned_node);
+			node_cache.mark_dirty(pinned_node);
 		}
 		// If the current pinned node changed update both the old and new node.
 		if (current_pinned_node != pinned_node) {
-			_mark_node_and_parents_dirty(pinned_node);
-			_mark_node_and_parents_dirty(current_pinned_node);
+			node_cache.mark_dirty(pinned_node);
+			node_cache.mark_dirty(current_pinned_node);
 			current_pinned_node = pinned_node;
 		}
 
@@ -1041,8 +1068,7 @@ void SceneTreeEditor::_test_update_tree() {
 		return; // did not change
 	}
 
-	callable_mp(this, &SceneTreeEditor::_update_tree).call_deferred(false);
-	tree_dirty = true;
+	_update_if_clean();
 }
 
 void SceneTreeEditor::_tree_process_mode_changed() {
@@ -1182,10 +1208,15 @@ void SceneTreeEditor::_notification(int p_what) {
 					}
 				}
 
-				if (item) {
-					// Must wait until tree is properly sized before scrolling.
-					ObjectID item_id = item->get_instance_id();
-					callable_mp(this, &SceneTreeEditor::_tree_scroll_to_item).call_deferred(item_id);
+				bool has_item = item;
+
+				if (update_when_invisble) {
+					if (has_item) {
+						ObjectID item_id = item->get_instance_id();
+						callable_mp(this, &SceneTreeEditor::_tree_scroll_to_item).call_deferred(item_id);
+					}
+				} else {
+					callable_mp(this, &SceneTreeEditor::_update_tree).call_deferred(has_item);
 				}
 			}
 		} break;
@@ -1406,18 +1437,16 @@ Node *SceneTreeEditor::get_selected() {
 
 void SceneTreeEditor::_update_marking_list(const HashSet<Node *> &p_marked, bool p_is_marked) {
 	for (Node *N : p_marked) {
-		HashMap<Node *, CachedNode>::Iterator I = node_cache.find(N);
+		HashMap<Node *, CachedNode>::Iterator I = node_cache.get(N);
 		if (I) {
-			_mark_node_and_parents_dirty(N);
-			_mark_node_children_dirty(N, true);
+			node_cache.mark_dirty(N);
+			node_cache.mark_children_dirty(N, true);
 		}
 	}
 }
 
 void SceneTreeEditor::set_marked(const HashSet<Node *> &p_marked, bool p_selectable, bool p_children_selectable) {
-	if (tree_dirty) {
-		_update_tree();
-	}
+	_update_if_clean();
 
 	_update_marking_list(marked, false);
 	_update_marking_list(p_marked, true);
@@ -1779,7 +1808,7 @@ void SceneTreeEditor::update_warning() {
 }
 
 void SceneTreeEditor::_warning_changed(Node *p_for_node) {
-	_mark_node_and_parents_dirty(p_for_node);
+	node_cache.mark_dirty(p_for_node);
 
 	//should use a timer
 	update_timer->start();
@@ -1799,6 +1828,11 @@ void SceneTreeEditor::set_connect_to_script_mode(bool p_enable) {
 
 void SceneTreeEditor::set_connecting_signal(bool p_enable) {
 	connecting_signal = p_enable;
+	update_tree();
+}
+
+void SceneTreeEditor::set_update_when_invisible(bool p_enable) {
+	update_when_invisble = p_enable;
 	update_tree();
 }
 
@@ -2078,6 +2112,7 @@ SceneTreeDialog::SceneTreeDialog() {
 	filter_hbc->add_child(show_all_nodes);
 
 	tree = memnew(SceneTreeEditor(false, false, true));
+	tree->set_update_when_invisible(false);
 	tree->set_v_size_flags(Control::SIZE_EXPAND_FILL);
 	tree->get_scene_tree()->connect("item_activated", callable_mp(this, &SceneTreeDialog::_select));
 	// Initialize button state, must be done after the tree has been created to update its 'show_all_nodes' flag.
@@ -2091,4 +2126,81 @@ SceneTreeDialog::SceneTreeDialog() {
 }
 
 SceneTreeDialog::~SceneTreeDialog() {
+}
+
+HashMap<Node *, SceneTreeEditor::CachedNode>::Iterator SceneTreeEditor::NodeCache::get(Node *p_node) {
+	if (!p_node) {
+		return HashMap<Node *, CachedNode>::Iterator();
+	}
+
+	HashMap<Node *, CachedNode>::Iterator I = cache.find(p_node);
+	return I;
+}
+
+HashMap<Node *, SceneTreeEditor::CachedNode>::Iterator SceneTreeEditor::NodeCache::add(Node *p_node, TreeItem *p_item) {
+	if (!p_node) {
+		return HashMap<Node *, CachedNode>::Iterator();
+	}
+
+	return cache.insert(p_node, CachedNode(p_item));
+}
+
+void SceneTreeEditor::NodeCache::remove(Node *p_node, bool p_recursive) {
+	if (!p_node) {
+		return;
+	}
+
+	HashMap<Node *, CachedNode>::Iterator I = cache.find(p_node);
+	if (I) {
+		if (p_recursive) {
+			int cc = p_node->get_child_count(false);
+
+			for (int i = 0; i < cc; i++) {
+				remove(p_node->get_child(i, false), p_recursive);
+			}
+		}
+
+		memdelete(I->value.item);
+		cache.remove(I);
+	}
+}
+
+void SceneTreeEditor::NodeCache::mark_dirty(Node *p_node, bool p_parents) {
+	Node *node = p_node;
+	while (node) {
+		HashMap<Node *, CachedNode>::Iterator I = cache.find(node);
+		if (I) {
+			I->value.dirty = true;
+		}
+
+		if (!p_parents) {
+			break;
+		}
+		node = node->get_parent();
+	}
+}
+
+void SceneTreeEditor::NodeCache::mark_dirty(HashMap<Node *, SceneTreeEditor::CachedNode>::Iterator &p_I, bool p_parents) {
+	if (p_I) {
+		mark_dirty(p_I->key, p_parents);
+	}
+}
+
+void SceneTreeEditor::NodeCache::mark_children_dirty(Node *p_node, bool p_recursive) {
+	if (!p_node) {
+		return;
+	}
+
+	int cc = p_node->get_child_count(false);
+	for (int i = 0; i < cc; i++) {
+		Node *c = p_node->get_child(i, false);
+		HashMap<Node *, CachedNode>::Iterator IC = cache.find(c);
+
+		if (IC) {
+			IC->value.dirty = true;
+			if (p_recursive) {
+				mark_children_dirty(c, p_recursive);
+			}
+		}
+	}
 }

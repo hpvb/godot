@@ -31,6 +31,7 @@
 #ifndef SCENE_TREE_EDITOR_H
 #define SCENE_TREE_EDITOR_H
 
+#include "core/string/node_path.h"
 #include "scene/gui/check_box.h"
 #include "scene/gui/check_button.h"
 #include "scene/gui/dialogs.h"
@@ -62,6 +63,7 @@ class SceneTreeEditor : public Control {
 		TreeItem *item = nullptr;
 		int index = -1;
 		bool dirty = true;
+		bool has_moved_children = false;
 
 		// To know whether to update children or not.
 		bool can_process = false;
@@ -70,7 +72,24 @@ class SceneTreeEditor : public Control {
 				item(it) {}
 	};
 
-	HashMap<Node *, CachedNode> node_cache;
+	class NodeCache {
+	public:
+		void clear() {
+			cache.clear();
+		}
+
+		HashMap<Node *, CachedNode>::Iterator get(Node *p_node);
+		HashMap<Node *, CachedNode>::Iterator add(Node *p_node, TreeItem *p_item);
+		void remove(Node *p_node, bool p_recursive = false);
+		void mark_dirty(Node *p_node, bool p_parents = true);
+		void mark_dirty(HashMap<Node *, CachedNode>::Iterator &I, bool p_parents = true);
+		void mark_children_dirty(Node *p_node, bool p_recursive = false);
+
+	private:
+		HashMap<Node *, CachedNode> cache;
+	};
+
+	NodeCache node_cache;
 	Node *current_scene_node = nullptr;
 	Node *current_pinned_node = nullptr;
 	bool current_has_pin = false;
@@ -95,6 +114,7 @@ class SceneTreeEditor : public Control {
 	bool auto_expand_selected = true;
 	bool connect_to_script_mode = false;
 	bool connecting_signal = false;
+	bool update_when_invisble = true;
 
 	int blocked;
 
@@ -103,6 +123,7 @@ class SceneTreeEditor : public Control {
 
 	void _update_node_subtree(Node *p_node, TreeItem *p_parent, bool force = false);
 	void _update_node(Node *p_node, TreeItem *p_item, bool part_of_subscene);
+	void _update_if_clean();
 
 	void _test_update_tree();
 	bool _update_filter(TreeItem *p_parent = nullptr, bool p_scroll_to_selected = false);
@@ -110,9 +131,9 @@ class SceneTreeEditor : public Control {
 	void _tree_changed();
 	void _tree_process_mode_changed();
 
-	void _node_cache_remove(Node *p_node, bool recursive = false);
-	void _mark_node_and_parents_dirty(Node *p_node);
-	void _mark_node_children_dirty(Node *p_node, bool recursive = false);
+	void _move_node_children(HashMap<Node *, CachedNode>::Iterator &p_I);
+	void _move_node_item(TreeItem *p_parent, HashMap<Node *, CachedNode>::Iterator &p_I);
+
 	void _node_child_order_changed(Node *p_node);
 	void _node_editor_state_changed(Node *p_node);
 	void _node_added(Node *p_node);
@@ -211,6 +232,7 @@ public:
 	void set_auto_expand_selected(bool p_auto, bool p_update_settings);
 	void set_connect_to_script_mode(bool p_enable);
 	void set_connecting_signal(bool p_enable);
+	void set_update_when_invisible(bool p_enable);
 
 	Tree *get_scene_tree() { return tree; }
 
