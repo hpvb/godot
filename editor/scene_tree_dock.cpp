@@ -84,10 +84,13 @@ void SceneTreeDock::_inspect_hovered_node() {
 	TreeItem *item = tree->get_item_with_metadata(node_hovered_now->get_path());
 	if (item) {
 		if (tree_item_inspected) {
+			tree_item_inspected->remove_meta(SNAME("custom_color"));
 			tree_item_inspected->clear_custom_color(0);
 		}
 		tree_item_inspected = item;
-		tree_item_inspected->set_custom_color(0, get_theme_color(SNAME("accent_color"), EditorStringName(Editor)));
+		Color accent_color = get_theme_color(SNAME("accent_color"), EditorStringName(Editor));
+		tree_item_inspected->set_custom_color(0, accent_color);
+		tree_item_inspected->set_meta(SNAME("custom_color"), accent_color);
 	}
 	EditorSelectionHistory *editor_history = EditorNode::get_singleton()->get_editor_selection_history();
 	editor_history->add_object(node_hovered_now->get_instance_id());
@@ -1716,6 +1719,7 @@ void SceneTreeDock::_notification(int p_what) {
 		case NOTIFICATION_DRAG_END: {
 			_reset_hovering_timer();
 			if (tree_item_inspected) {
+				tree_item_inspected->remove_meta(SNAME("custom_color"));
 				tree_item_inspected->clear_custom_color(0);
 				tree_item_inspected = nullptr;
 			} else {
