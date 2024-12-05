@@ -467,7 +467,63 @@ Variant Object::get_indexed(const Vector<StringName> &p_names, bool *r_valid) co
 	return current_value;
 }
 
+#ifdef TOOLS_ENABLED
+
+void Object::_update_nodepath_cache_recursive(const PropertyInfo &p_info, const Variant &p_variant) const {
+	if (!(p_info.usage & (PROPERTY_USAGE_STORAGE | PROPERTY_USAGE_EDITOR))) {
+		return;
+	}
+
+	switch (p_variant.get_type()) {
+		case Variant::NODE_PATH: {
+			nodepath_property_cache[p_variant] = p_info.name;
+		} break;
+
+		case Variant::ARRAY: {
+			Array a = p_variant;
+			for (int i = 0; i < a.size(); i++) {
+				Variant value = a[i];
+				_update_nodepath_cache_recursive(p_info, value);
+			}
+		} break;
+
+		case Variant::DICTIONARY: {
+			Dictionary d = p_variant;
+			for (int i = 0; i < d.size(); i++) {
+				Variant value = d.get_value_at_index(i);
+				_update_nodepath_cache_recursive(p_info, value);
+			}
+		} break;
+
+		case Variant::OBJECT: {
+			Resource *resource = Object::cast_to<Resource>(p_variant);
+			if (!resource || !resource->is_built_in()) {
+				break;
+			}
+
+			List<PropertyInfo> properties;
+			resource->get_property_list(&properties);
+
+			for (KeyValue<NodePath, String> K : resource->nodepath_property_cache) {
+				nodepath_property_cache[K.key] = p_info.name;
+			}
+		} break;
+
+		default: {
+		}
+	}
+}
+
+bool Object::editor_property_has_nodepath(const NodePath &p_path) {
+	return nodepath_property_cache.has(p_path);
+}
+#endif
+
 void Object::get_property_list(List<PropertyInfo> *p_list, bool p_reversed) const {
+#ifdef TOOLS_ENABLED
+	nodepath_property_cache.clear();
+#endif
+
 	if (script_instance && p_reversed) {
 		script_instance->get_property_list(p_list);
 	}
@@ -525,6 +581,12 @@ void Object::get_property_list(List<PropertyInfo> *p_list, bool p_reversed) cons
 		}
 		p_list->push_back(pi);
 	}
+
+#ifdef TOOLS_ENABLED
+	for (PropertyInfo &info : *p_list) {
+		_update_nodepath_cache_recursive(info, get(info.name));
+	}
+#endif
 }
 
 void Object::validate_property(PropertyInfo &p_property) const {

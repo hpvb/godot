@@ -2071,6 +2071,18 @@ void SceneTreeDock::perform_node_renames(Node *p_base, HashMap<Node *, NodePath>
 		return;
 	}
 
+	bool any = false;
+	for (KeyValue<Node *, NodePath> K : *p_renames) {
+		NodePath path = p_base->get_path().rel_path_to(K.key->get_path());
+		if (p_base->editor_property_has_nodepath(path)) {
+			any = true;
+		}
+	}
+
+	if (!any) {
+		return;
+	}
+
 	// No renaming if base node is deleted.
 	HashMap<Node *, NodePath>::Iterator found_base_path = p_renames->find(p_base);
 	if (found_base_path && found_base_path->value.is_empty()) {

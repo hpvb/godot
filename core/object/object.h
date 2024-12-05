@@ -627,6 +627,8 @@ private:
 	bool _edited = false;
 	uint32_t _edited_version = 0;
 	HashSet<String> editor_section_folding;
+	mutable HashMap<NodePath, String> nodepath_property_cache;
+	void _update_nodepath_cache_recursive(const PropertyInfo &p_info, const Variant &p_variant) const;
 #endif
 	ScriptInstance *script_instance = nullptr;
 	Variant script; // Reference does not exist yet, store it in a Variant.
@@ -966,7 +968,7 @@ public:
 	bool editor_is_section_unfolded(const String &p_section);
 	const HashSet<String> &editor_get_section_folding() const { return editor_section_folding; }
 	void editor_clear_section_folding() { editor_section_folding.clear(); }
-
+	bool editor_property_has_nodepath(const NodePath &p_path);
 #endif
 
 	// Used by script languages to store binding data.
