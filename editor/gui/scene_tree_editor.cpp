@@ -250,23 +250,21 @@ void SceneTreeEditor::_update_node_subtree(Node *p_node, TreeItem *p_parent, boo
 	// which the editor needs not to know about.
 
 	bool part_of_subscene = false;
-	HashMap<Node *, CachedNode>::Iterator I = node_cache.get(p_node);
 
 	if (!display_foreign && p_node->get_owner() != get_scene_node() && p_node != get_scene_node()) {
 		if ((show_enabled_subscene || can_open_instance) && p_node->get_owner() && (get_scene_node()->is_editable_instance(p_node->get_owner()))) {
 			part_of_subscene = true;
 			// Allow.
 		} else {
-			if (I) {
-				// Stale node, remove recursively.
-				node_cache.remove(p_node, true);
-			}
+			// Stale node, remove recursively.
+			node_cache.remove(p_node, true);
 			return;
 		}
 	} else {
 		part_of_subscene = p_node != get_scene_node() && get_scene_node()->get_scene_inherited_state().is_valid() && get_scene_node()->get_scene_inherited_state()->find_node_by_path(get_scene_node()->get_path_to(p_node)) >= 0;
 	}
 
+	HashMap<Node *, CachedNode>::Iterator I = node_cache.get(p_node);
 	TreeItem *item;
 
 	bool is_new = false;
@@ -297,23 +295,24 @@ void SceneTreeEditor::_update_node_subtree(Node *p_node, TreeItem *p_parent, boo
 		_move_node_item(p_parent, I);
 	}
 
-	bool dirty = force || I->value.dirty;
-
 	if (I->value.has_moved_children) {
 		_move_node_children(I);
 	}
 
-	if (dirty) {
-		_update_node(p_node, item, part_of_subscene);
-		I->value.dirty = false;
-		I->value.can_process = p_node->can_process();
+	if (!(force || I->value.dirty)) {
+		// Nothing to do.
+		return;
+	}
 
-		// Force update all our children if we are new or if we were forced to update.
-		bool force_update_children = force || is_new;
-		// Update all our children.
-		for (int i = 0; i < p_node->get_child_count(false); i++) {
-			_update_node_subtree(p_node->get_child(i, false), item, force_update_children);
-		}
+	_update_node(p_node, item, part_of_subscene);
+	I->value.dirty = false;
+	I->value.can_process = p_node->can_process();
+
+	// Force update all our children if we are new or if we were forced to update.
+	bool force_update_children = force || is_new;
+	// Update all our children.
+	for (int i = 0; i < p_node->get_child_count(false); i++) {
+		_update_node_subtree(p_node->get_child(i, false), item, force_update_children);
 	}
 
 	if (valid_types.size()) {
@@ -752,29 +751,23 @@ void SceneTreeEditor::_move_node_item(TreeItem *p_parent, HashMap<Node *, Cached
 	}
 
 	if (p_I->value.index != current_node_index) {
-		int current_item_index = item->get_index();
 		// Are we already in the right place?
-		if (current_node_index == current_item_index) {
+		if (current_node_index == item->get_index()) {
 			p_I->value.index = current_node_index;
 			return;
 		}
 
-		bool first_node = false;
 		TreeItem *neighbor_item;
 		// Are we the first node?
 		if (current_node_index == 0) {
 			// There has to be at least 1 other node, otherwise we would not have gotten here.
 			neighbor_item = p_parent->get_child(0);
-			first_node = true;
-		} else {
-			neighbor_item = p_parent->get_child(CLAMP(current_node_index - 1, 0, p_parent->get_child_count() - 1));
-		}
-
-		if (first_node) {
 			item->move_before(neighbor_item);
 		} else {
+			neighbor_item = p_parent->get_child(CLAMP(current_node_index - 1, 0, p_parent->get_child_count() - 1));
 			item->move_after(neighbor_item);
 		}
+
 		p_I->value.index = current_node_index;
 	}
 }
@@ -819,6 +812,8 @@ void SceneTreeEditor::_node_removed(Node *p_node) {
 	if (p_node == selected) {
 		selected = nullptr;
 	}
+
+	marked.erase(p_node);
 
 	node_cache.mark_dirty(p_node);
 	node_cache.remove(p_node);
@@ -1051,11 +1046,9 @@ bool SceneTreeEditor::_item_matches_all_terms(TreeItem *p_item, const PackedStri
 }
 
 void SceneTreeEditor::_compute_hash(Node *p_node, uint64_t &hash) {
-	hash = hash_djb2_one_64(p_node->get_instance_id(), hash);
-	if (p_node->get_parent()) {
-		hash = hash_djb2_one_64(p_node->get_parent()->get_instance_id(), hash); //so a reparent still produces a different hash
-	}
-
+	// Nodes are added and removed by Node* pointers.
+	hash = hash_djb2_one_64((ptrdiff_t)p_node, hash);
+	// Hashes are not communicative, if the node order changes so will the hash.
 	for (int i = 0; i < p_node->get_child_count(); i++) {
 		_compute_hash(p_node->get_child(i), hash);
 	}
@@ -1123,7 +1116,7 @@ void SceneTreeEditor::_selected_changed() {
 		return;
 	}
 
-	selected = get_node(np);
+	selected = n;
 
 	blocked++;
 	emit_signal(SNAME("node_selected"));
@@ -2166,7 +2159,7 @@ HashMap<Node *, SceneTreeEditor::CachedNode>::Iterator SceneTreeEditor::NodeCach
 
 	HashMap<Node *, CachedNode>::Iterator I = cache.find(p_node);
 	if (I) {
-		I->value.delete_serial = UINT16_MAX;
+		to_delete.erase(&I->value);
 	}
 	return I;
 }
@@ -2188,13 +2181,13 @@ void SceneTreeEditor::NodeCache::remove(Node *p_node, bool p_recursive) {
 
 		TreeItem *parent = I->value.item->get_parent();
 		if (parent) {
+			// Do not remove from the Tree control here. See delete_pending below.
 			I->value.item->deselect(0);
-			parent->remove_child(I->value.item);
 			I->value.delete_serial = delete_serial;
 			I->value.index = -1;
-			to_delete.push_back(&I->value);
+			to_delete.insert(&I->value);
 		} else {
-			// If it is the root node, we leave the TreeItem it and reuse it later.
+			// If it is the root node, we leave the TreeItem and reuse it later.
 			cache.remove(I);
 		}
 	}
@@ -2242,16 +2235,22 @@ void SceneTreeEditor::NodeCache::mark_children_dirty(Node *p_node, bool p_recurs
 }
 
 void SceneTreeEditor::NodeCache::delete_pending() {
-	for (SceneTreeEditor::CachedNode *E : to_delete) {
-		if (E->delete_serial != UINT16_MAX) {
-			if (abs(E->delete_serial - delete_serial) >= 2) {
-				memdelete(E->item);
-				cache.erase(E->node);
-				to_delete.erase(E);
-			}
+	HashSet<CachedNode *>::Iterator I = to_delete.begin();
+	while (I) {
+		if (abs((*I)->delete_serial - delete_serial) >= 2) {
+			memdelete((*I)->item);
+			cache.erase((*I)->node);
+			to_delete.remove(I);
 		} else {
-			to_delete.erase(E);
+			// We don't remove from the tree until now because if the node got
+			// deleted from a @tool script the SceneTreeEditor might have had it
+			// marked or selected before the node was removed. If we immediately
+			// remove from the Tree control then we end up trying to scroll to an
+			// Item without a parent.
+			TreeItem *parent = (*I)->item->get_parent();
+			parent->remove_child((*I)->item);
 		}
+		++I;
 	}
 
 	++delete_serial;

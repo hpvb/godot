@@ -35,7 +35,6 @@
 #include "scene/gui/check_button.h"
 #include "scene/gui/dialogs.h"
 #include "scene/gui/tree.h"
-#include <cstdint>
 
 class EditorSelection;
 class TextureRect;
@@ -90,7 +89,7 @@ class SceneTreeEditor : public Control {
 		void clear();
 
 		HashMap<Node *, CachedNode> cache;
-		List<CachedNode *> to_delete;
+		HashSet<CachedNode *> to_delete;
 		Node *current_scene_node = nullptr;
 		Node *current_pinned_node = nullptr;
 		bool current_has_pin = false;
