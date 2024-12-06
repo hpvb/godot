@@ -223,6 +223,8 @@ void SceneTreeEditor::_update_node_path(Node *p_node, bool p_recursive) {
 		return;
 	}
 
+	printf("_update_node_path: %ls\n", (((String)p_node->get_name()).ptr()));
+
 	HashMap<Node *, CachedNode>::Iterator I = node_cache.get(p_node);
 	if (!I) {
 		return;
@@ -250,23 +252,22 @@ void SceneTreeEditor::_update_node_subtree(Node *p_node, TreeItem *p_parent, boo
 	// which the editor needs not to know about.
 
 	bool part_of_subscene = false;
-	HashMap<Node *, CachedNode>::Iterator I = node_cache.get(p_node);
 
 	if (!display_foreign && p_node->get_owner() != get_scene_node() && p_node != get_scene_node()) {
 		if ((show_enabled_subscene || can_open_instance) && p_node->get_owner() && (get_scene_node()->is_editable_instance(p_node->get_owner()))) {
 			part_of_subscene = true;
 			// Allow.
 		} else {
-			if (I) {
-				// Stale node, remove recursively.
-				node_cache.remove(p_node, true);
-			}
+			// Stale node, remove recursively.
+			printf("Non-node: %ls\n", (((String)p_node->get_name()).ptr()));
+			node_cache.remove(p_node, true);
 			return;
 		}
 	} else {
 		part_of_subscene = p_node != get_scene_node() && get_scene_node()->get_scene_inherited_state().is_valid() && get_scene_node()->get_scene_inherited_state()->find_node_by_path(get_scene_node()->get_path_to(p_node)) >= 0;
 	}
 
+	HashMap<Node *, CachedNode>::Iterator I = node_cache.get(p_node);
 	TreeItem *item;
 
 	bool is_new = false;
@@ -285,6 +286,7 @@ void SceneTreeEditor::_update_node_subtree(Node *p_node, TreeItem *p_parent, boo
 		} else {
 			item = tree->create_item(p_parent, p_node->get_index(false));
 			index = p_node->get_index(false);
+			printf("Creating new node: %ls\n", (((String)p_node->get_name()).ptr()));
 		}
 
 		I = node_cache.add(p_node, item);
@@ -303,6 +305,8 @@ void SceneTreeEditor::_update_node_subtree(Node *p_node, TreeItem *p_parent, boo
 		_move_node_children(I);
 	}
 
+	printf("updating node: %ls, dirty: %i\n", (((String)p_node->get_name()).ptr()), dirty);
+
 	if (dirty) {
 		_update_node(p_node, item, part_of_subscene);
 		I->value.dirty = false;
@@ -315,6 +319,8 @@ void SceneTreeEditor::_update_node_subtree(Node *p_node, TreeItem *p_parent, boo
 			_update_node_subtree(p_node->get_child(i, false), item, force_update_children);
 		}
 	}
+
+	return;
 
 	if (valid_types.size()) {
 		bool valid = false;
@@ -790,6 +796,7 @@ void SceneTreeEditor::_node_child_order_changed(Node *p_node) {
 }
 
 void SceneTreeEditor::_node_editor_state_changed(Node *p_node) {
+	printf("_node_editor_state_changed: %ls\n", (((String)p_node->get_name()).ptr()));
 	node_cache.mark_dirty(p_node);
 	HashMap<Node *, CachedNode>::Iterator I = node_cache.get(p_node);
 	if (I) {

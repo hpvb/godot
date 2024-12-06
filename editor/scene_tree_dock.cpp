@@ -34,6 +34,7 @@
 #include "core/input/input.h"
 #include "core/io/resource_saver.h"
 #include "core/object/class_db.h"
+#include "core/object/object.h"
 #include "core/os/keyboard.h"
 #include "editor/debugger/editor_debugger_node.h"
 #include "editor/editor_feature_profile.h"
@@ -62,10 +63,12 @@
 #include "scene/audio/audio_stream_player.h"
 #include "scene/gui/check_box.h"
 #include "scene/property_utils.h"
+#include "scene/resources/material.h"
 #include "scene/resources/packed_scene.h"
 #include "servers/display_server.h"
 
 #include "modules/modules_enabled.gen.h" // For regex.
+#include "thirdparty/ufbx/ufbx.h"
 #ifdef MODULE_REGEX_ENABLED
 #include "editor/rename_dialog.h"
 #endif // MODULE_REGEX_ENABLED
@@ -1963,6 +1966,59 @@ bool SceneTreeDock::_update_node_path(Node *p_root_node, NodePath &r_node_path, 
 	return false;
 }
 
+void SceneTreeDock::_check_object_properties_recursive(Node *p_root_node, Object *p_obj, HashMap<Node *, NodePath> *p_renames, bool p_inside_resource) const {
+	// Materials can't have NodePath properties anyway.
+	if (cast_to<StandardMaterial3D>(p_obj)) {
+		return;
+	}
+
+	List<PropertyInfo> properties;
+	p_obj->get_property_list(&properties);
+
+	static const PropertyHint property_hint_check[] = { PROPERTY_HINT_NONE, PROPERTY_HINT_RESOURCE_TYPE, PROPERTY_HINT_ARRAY_TYPE, PROPERTY_HINT_OBJECT_ID, PROPERTY_HINT_DICTIONARY_TYPE };
+	static const Variant::Type property_type_check[] = { Variant::OBJECT, Variant::NODE_PATH, Variant::ARRAY, Variant::DICTIONARY, Variant::RID };
+
+	for (const PropertyInfo &E : properties) {
+		if (!(E.usage & (PROPERTY_USAGE_STORAGE | PROPERTY_USAGE_EDITOR))) {
+			continue;
+		}
+
+		bool recurse = false;
+		for (uint32_t i = 0; i < sizeof(property_hint_check) / sizeof(PropertyHint); ++i) {
+			if (E.hint == property_hint_check[i]) {
+				recurse = true;
+				break;
+			}
+		}
+
+		if (!recurse) {
+			continue;
+		}
+		
+		recurse = false;
+		for (uint32_t i = 0; i < sizeof(property_type_check) / sizeof(Variant::Type); ++i) {
+			if (E.type == property_type_check[i]) {
+				recurse = true;
+				break;
+			}
+		}
+
+		if (!recurse) {
+			continue;
+		}
+
+		String propertyname = E.name;
+
+		Variant old_variant = p_obj->get(propertyname);
+		Variant updated_variant = old_variant;
+		if (_check_node_path_recursive(p_root_node, updated_variant, p_renames, p_inside_resource)) {
+			EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
+			undo_redo->add_do_property(p_obj, propertyname, updated_variant);
+			undo_redo->add_undo_property(p_obj, propertyname, old_variant);
+		}
+	}
+}
+
 bool SceneTreeDock::_check_node_path_recursive(Node *p_root_node, Variant &r_variant, HashMap<Node *, NodePath> *p_renames, bool p_inside_resource) const {
 	switch (r_variant.get_type()) {
 		case Variant::NODE_PATH: {
@@ -2032,22 +2088,7 @@ bool SceneTreeDock::_check_node_path_recursive(Node *p_root_node, Variant &r_var
 				break;
 			}
 
-			List<PropertyInfo> properties;
-			resource->get_property_list(&properties);
-
-			for (const PropertyInfo &E : properties) {
-				if (!(E.usage & (PROPERTY_USAGE_STORAGE | PROPERTY_USAGE_EDITOR))) {
-					continue;
-				}
-				String propertyname = E.name;
-				Variant old_variant = resource->get(propertyname);
-				Variant updated_variant = old_variant;
-				if (_check_node_path_recursive(p_root_node, updated_variant, p_renames, true)) {
-					EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
-					undo_redo->add_do_property(resource, propertyname, updated_variant);
-					undo_redo->add_undo_property(resource, propertyname, old_variant);
-				}
-			}
+			_check_object_properties_recursive(p_root_node, resource, p_renames, p_inside_resource);
 		} break;
 
 		default: {
@@ -2173,22 +2214,7 @@ void SceneTreeDock::perform_node_renames(Node *p_base, HashMap<Node *, NodePath>
 	}
 
 	// Renaming node paths used in node properties.
-	List<PropertyInfo> properties;
-	p_base->get_property_list(&properties);
-
-	for (const PropertyInfo &E : properties) {
-		if (!(E.usage & (PROPERTY_USAGE_STORAGE | PROPERTY_USAGE_EDITOR))) {
-			continue;
-		}
-		String propertyname = E.name;
-		Variant old_variant = p_base->get(propertyname);
-		Variant updated_variant = old_variant;
-		if (_check_node_path_recursive(p_base, updated_variant, p_renames)) {
-			EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
-			undo_redo->add_do_property(p_base, propertyname, updated_variant);
-			undo_redo->add_undo_property(p_base, propertyname, old_variant);
-		}
-	}
+	_check_object_properties_recursive(p_base, p_base, p_renames);
 
 	for (int i = 0; i < p_base->get_child_count(); i++) {
 		perform_node_renames(p_base->get_child(i), p_renames, r_rem_anims);

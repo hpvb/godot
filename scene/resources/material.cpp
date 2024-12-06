@@ -2380,11 +2380,12 @@ BaseMaterial3D::TextureFilter BaseMaterial3D::get_texture_filter() const {
 	return texture_filter;
 }
 
-void BaseMaterial3D::_validate_feature(const String &text, Feature feature, PropertyInfo &property) const {
-	if (property.name.begins_with(text) && property.name != text + "_enabled" && !features[feature]) {
-		property.usage = PROPERTY_USAGE_NO_EDITOR;
-	}
-}
+#define _validate_feature(text, feature, property)                                                       \
+	do {                                                                                                 \
+		if (property.name.begins_with(text) && property.name != text "_enabled" && !features[feature]) { \
+			property.usage = PROPERTY_USAGE_NO_EDITOR;                                                   \
+		}                                                                                                \
+	} while (false);
 
 void BaseMaterial3D::_validate_property(PropertyInfo &p_property) const {
 	_validate_feature("normal", FEATURE_NORMAL_MAPPING, p_property);
