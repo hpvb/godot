@@ -84,10 +84,16 @@ void SceneTreeDock::_inspect_hovered_node() {
 	TreeItem *item = tree->get_item_with_metadata(node_hovered_now->get_path());
 	if (item) {
 		if (tree_item_inspected) {
-			tree_item_inspected->remove_meta(SNAME("custom_color"));
-			tree_item_inspected->clear_custom_color(0);
+			if (tree_item_inspected_previous_custom_color != Color()) { // We must restore the previous item back to its original color.
+				tree_item_inspected->set_custom_color(0, tree_item_inspected_previous_custom_color);
+				tree_item_inspected->set_meta(SNAME("custom_color"), tree_item_inspected_previous_custom_color);
+			} else {
+				tree_item_inspected->clear_custom_color(0);
+				tree_item_inspected->remove_meta(SNAME("custom_color"));
+			}
 		}
 		tree_item_inspected = item;
+		tree_item_inspected_previous_custom_color = item->get_custom_color(0); // We must store the previous color to set it back later.
 		Color accent_color = get_theme_color(SNAME("accent_color"), EditorStringName(Editor));
 		tree_item_inspected->set_custom_color(0, accent_color);
 		tree_item_inspected->set_meta(SNAME("custom_color"), accent_color);
@@ -1719,9 +1725,15 @@ void SceneTreeDock::_notification(int p_what) {
 		case NOTIFICATION_DRAG_END: {
 			_reset_hovering_timer();
 			if (tree_item_inspected) {
-				tree_item_inspected->remove_meta(SNAME("custom_color"));
-				tree_item_inspected->clear_custom_color(0);
+				if (tree_item_inspected_previous_custom_color != Color()) { // We must restore the item back to its original color.
+					tree_item_inspected->set_custom_color(0, tree_item_inspected_previous_custom_color);
+					tree_item_inspected->set_meta(SNAME("custom_color"), tree_item_inspected_previous_custom_color);
+				} else {
+					tree_item_inspected->clear_custom_color(0);
+					tree_item_inspected->remove_meta(SNAME("custom_color"));
+				}
 				tree_item_inspected = nullptr;
+				tree_item_inspected_previous_custom_color = Color();
 			} else {
 				return;
 			}
